@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Memory Manager OpenAI connection watcher
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/user/Ai-MemoryManager
+ExecStart=/usr/bin/node /home/user/Ai-MemoryManager/src/ai_memory_manager/service/openai_connection_watcher.mjs
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

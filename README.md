@@ -2,7 +2,7 @@
 
 面向 AI 助手的跨平台、模型无关的记忆管理系统。
 
-> **项目阶段：** 目前处于需求整理与方案讨论阶段，尚未确定具体实现架构或客户端接入方式。
+> **项目阶段：** GPT 接入原型开发中。现有模块可读取用户提供的会话导出文件，也提供依赖界面结构的实验性实时捕获；整体存储架构尚未确定。
 
 ## 已确认需求
 
@@ -23,7 +23,7 @@
 
 | 模块 | 作用 |
 |---|---|
-| `connectors/gpt` | 负责 GPT/ChatGPT 侧的会话接入；仅使用实际可用且有依据的接入方式，不假定存在受支持的本地历史 API。 |
+| `connectors/gpt` | 归档 ChatGPT ZIP、监视下载目录自动导入、捕获 ChatGPT/Codex 界面可见消息，并在 Codex 会话结束时备份本地转录。实时捕获依赖界面结构，不能代替完整原始归档。 |
 | `connectors/dsh` | 预留 DSH 侧会话接入，由对应开发方实现，并与共用归档流程衔接。 |
 | `archive` | 保存和组织会话原始记录，保留消息原貌，并关联提供方、人设和日期。 |
 | `personas` | 管理各 AI 身份的人设档案、文字特征及外观参考素材。 |
@@ -31,7 +31,7 @@
 | `search` | 提供对会话及记忆内容的检索能力。 |
 | `reconciliation` | 定期对账来源端与已归档内容，目标周期为每 30 分钟；新消息仍应尽快保存。 |
 | `privacy` | 处理用户提出的遗忘和删除请求，并清理受影响的概要、索引等衍生数据。 |
-| `service` | 承载持续运行的后台管理与协调逻辑。 |
+| `service` | 承载后台管理与协调逻辑；当前提供监测 OpenAI 相关请求并自动启动 GPT 实时捕获的原型。 |
 | `ui` | 提供用于配置、查看和控制记忆的管理界面。 |
 | `sync` | 承载可选同步能力；同步范围和目标由用户控制。 |
 
@@ -48,6 +48,31 @@
 
 每种客户端及其安装方式都需要单独确认可用的接入途径。本项目**不假定 ChatGPT 提供受支持的本地历史记录 API**。如果没有受支持的直接接口，应采用用户授权的导入导出或其他有文档说明的接入方式；不把未公开的私有数据格式当作稳定接口。
 
-## 下一步需要决定的事项
+### GPT 实时捕获原型
 
-选择首个 Linux 客户端，以及该客户端受支持或由用户控制的会话接入方式。此决定将确定首个小规模原型的范围，同时避免过早锁定整体架构。
+Linux 上需使用 Node.js 21 或更高版本，并运行 `src/ai_memory_manager/connectors/gpt/live_capture.mjs`。它通过本机调试端口观察 ChatGPT 页面及 Codex 桌面会话中的可见消息，并按来源、日期和会话保存快照及去重后的消息视图。该原型依赖客户端界面结构，可能漏掉未加载的历史、隐藏内容和附件，也不能保证保留平台内部的原始消息结构。官方 ZIP 导入会把完整会话对象逐个写入 `Session_Lib`。
+
+```bash
+node src/ai_memory_manager/connectors/gpt/live_capture.mjs
+```
+
+默认数据写入 `src/ai_memory_manager/archive/Session_Lib/<来源>/<日期>/`。ChatGPT 使用会话名称和编号建目录，Codex 使用会话编号建目录以便与会话结束原文归档合并。实时捕获使用 `messages.jsonl` 保存去重合并后的最新消息，并用 `snapshots.jsonl` 保留变化快照。按 `Ctrl+C` 停止；可用 `--output-dir <目录>` 指定会话目录根路径。运行前需由用户自行启用相应桌面端的本机调试端口。
+
+ChatGPT 官方导出 ZIP 可直接归档，或监视下载目录自动处理：
+
+```bash
+PYTHONPATH=src python src/ai_memory_manager/connectors/gpt/export_import.py /路径/到/导出文件.zip
+PYTHONPATH=src python src/ai_memory_manager/connectors/gpt/export_import.py --watch-dir ~/Downloads
+```
+
+可通过 `src/ai_memory_manager/service/openai_connection_watcher.mjs` 在后台监测调试端口中的 OpenAI 相关请求，并在检测到后自动启动实时捕获。监测器只观察请求域名，不读取请求正文；详细用法见 `src/ai_memory_manager/service/README.md`。
+
+Codex 会话另有基于官方 `SessionEnd` 生命周期钩子的自动归档入口：会话结束时从事件提供的本地转录路径复制原文件，按结束日期和会话编号保存，不解析内部格式。安装方法、触发条件和局限见 `src/ai_memory_manager/connectors/gpt/README.md`。
+
+## 后续待定事项
+
+- 验证 Codex `SessionEnd` 钩子在重启并信任配置后的真实触发情况。
+- 继续评估 ChatGPT 可用的受支持会话接入方式；目前官方 ZIP 仍需用户主动申请，自动监视仅负责下载完成后的导入。
+- 逐步确定长期存储结构及其他客户端的接入方式。
+
+- **前端开发待办：** 将 OpenAI 连接监测服务接入前端启动流程，使用户启动前端时自动启动后台服务；同时取消该服务单独的登录自启，避免前端未运行时后台服务独立启动。

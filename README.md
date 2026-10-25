@@ -65,6 +65,8 @@ PYTHONPATH=src python src/ai_memory_manager/connectors/gpt/export_import.py /路
 PYTHONPATH=src python src/ai_memory_manager/connectors/gpt/export_import.py --watch-dir ~/Downloads
 ```
 
+可在导入时添加 `--persona-id <编号>`，将这一批会话关联到指定人设；每个会话目录旁会生成独立的 `session.meta.json` 清单，记录来源、会话编号、日期、归档方式、人设编号及会话文件名。未指定人设时编号保存为 `null`。
+
 可通过 `src/ai_memory_manager/service/openai_connection_watcher.mjs` 在后台监测调试端口中的 OpenAI 相关请求，并在检测到后自动启动实时捕获。监测器只观察请求域名，不读取请求正文；详细用法见 `src/ai_memory_manager/service/README.md`。
 
 Codex 会话另有基于官方 `SessionEnd` 生命周期钩子的自动归档入口：会话结束时从事件提供的本地转录路径复制原文件，按结束日期和会话编号保存，不解析内部格式。安装方法、触发条件和局限见 `src/ai_memory_manager/connectors/gpt/README.md`。

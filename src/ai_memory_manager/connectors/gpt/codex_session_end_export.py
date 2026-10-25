@@ -17,7 +17,7 @@ sys.path.insert(0, str(源代码目录))
 from ai_memory_manager.archive.session_archive import (
     会话目录,
     原子写入字节,
-    原子写入会话对象,
+    写入会话元数据,
 )
 
 
@@ -47,17 +47,25 @@ def _归档(事件: dict[str, Any]) -> Path:
     目标目录 = 会话目录("Codex", 日期, 会话编号)
     目标文件 = 原子写入字节(目标目录 / "session.jsonl", 源文件.read_bytes())
 
-    元数据 = {
-        "session_id": 会话编号,
-        "source": "codex-session-end-hook",
-        "exported_at": datetime.now().astimezone().isoformat(),
-        "cwd": 事件.get("cwd"),
-        "model": 事件.get("model"),
-        "reason": 事件.get("reason"),
-        "transcript_path": str(源文件),
-        "transcript_format": "opaque; copied byte-for-byte",
-    }
-    原子写入会话对象(目标目录 / "session.meta.json", 元数据)
+    写入会话元数据(
+        目标目录,
+        来源="Codex",
+        会话编号=会话编号,
+        日期=日期,
+        归档方式="session-end-hook",
+        文件列表=sorted(
+            path.name
+            for path in 目标目录.iterdir()
+            if path.is_file() and path.name != "session.meta.json"
+        ),
+        其他字段={
+            "cwd": 事件.get("cwd"),
+            "model": 事件.get("model"),
+            "reason": 事件.get("reason"),
+            "transcript_path": str(源文件),
+            "transcript_format": "opaque; copied byte-for-byte",
+        },
+    )
     return 目标文件
 
 

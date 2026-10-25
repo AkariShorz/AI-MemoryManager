@@ -29,6 +29,8 @@ PYTHONPATH=src python src/ai_memory_manager/connectors/gpt/export_import.py \
 
 也可指定 `--output-dir <目录>`。ZIP 导入按会话 ID 覆盖同一会话文件，因此重复导入具有幂等性。
 
+导入时可通过 `--persona-id <编号>` 将整批会话关联到一个人设；省略时元数据中的 `persona_id` 为 `null`。归档会同时写入 `session.meta.json` 清单，包含提供方、会话编号、日期、归档方式和原始会话文件名。该清单与原始会话分开保存，后续可以重建索引。
+
 归档路径为：
 
 ```text

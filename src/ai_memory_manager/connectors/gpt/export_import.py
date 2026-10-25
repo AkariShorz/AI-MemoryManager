@@ -17,6 +17,7 @@ from ai_memory_manager.archive.session_archive import (
     会话目录,
     原子写入会话对象,
     安全名称,
+    写入会话元数据,
 )
 
 
@@ -105,7 +106,11 @@ def _read_zip(path: Path) -> bytes:
         raise ChatGPTExportError(f"无法读取 ZIP 导出包：{path}") from exc
 
 
-def archive_export(path: str | Path, output_dir: str | Path | None = None) -> list[Path]:
+def archive_export(
+    path: str | Path,
+    output_dir: str | Path | None = None,
+    persona_id: str | None = None,
+) -> list[Path]:
     """把导出包中的每个会话原对象分别写入 Session_Lib。"""
 
     archived: list[Path] = []
@@ -118,9 +123,18 @@ def archive_export(path: str | Path, output_dir: str | Path | None = None) -> li
         directory = 会话目录(
             "ChatGPT", date, conversation.conversation_id, title, output_dir
         )
-        archived.append(
-            原子写入会话对象(directory / f"{安全名称(title)}.json", raw)
+        session_file = 原子写入会话对象(directory / f"{安全名称(title)}.json", raw)
+        写入会话元数据(
+            directory,
+            来源="ChatGPT",
+            会话编号=conversation.conversation_id,
+            日期=date,
+            会话名称=title,
+            人设编号=persona_id,
+            归档方式="official-export",
+            文件列表=[session_file.name],
         )
+        archived.append(session_file)
     return archived
 
 
@@ -128,6 +142,7 @@ def watch_export_directory(
     directory: str | Path,
     output_dir: str | Path | None = None,
     poll_seconds: float = 3.0,
+    persona_id: str | None = None,
 ) -> None:
     """监视用户指定目录，文件连续两次保持不变后自动导入。"""
 
@@ -156,7 +171,7 @@ def watch_export_directory(
             if stable_count < 1 or imported.get(candidate) == version:
                 continue
             try:
-                paths = archive_export(candidate, output_dir)
+                paths = archive_export(candidate, output_dir, persona_id)
             except (ChatGPTExportError, OSError) as error:
                 print(f"跳过 {candidate.name}：{error}", file=sys.stderr)
                 imported[candidate] = version
@@ -170,6 +185,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="导入并归档 ChatGPT 数据导出包")
     parser.add_argument("source", nargs="?", help="ZIP 文件或 conversations.json")
     parser.add_argument("--output-dir", help="Session_Lib 根目录")
+    parser.add_argument("--persona-id", help="将导入会话关联到此人设编号")
     parser.add_argument("--watch-dir", help="监视指定目录并自动归档新导出文件")
     parser.add_argument("--poll-seconds", type=float, default=3.0, help="监视轮询间隔")
     args = parser.parse_args()
@@ -177,14 +193,16 @@ def main() -> int:
         if args.source:
             parser.error("--watch-dir 与 source 不能同时使用")
         try:
-            watch_export_directory(args.watch_dir, args.output_dir, args.poll_seconds)
+            watch_export_directory(
+                args.watch_dir, args.output_dir, args.poll_seconds, args.persona_id
+            )
         except (OSError, ValueError) as error:
             parser.exit(1, f"导出目录监视失败：{error}\n")
         return 0
     if not args.source:
         parser.error("请提供 ZIP/conversations.json，或指定 --watch-dir")
     try:
-        written = archive_export(args.source, args.output_dir)
+        written = archive_export(args.source, args.output_dir, args.persona_id)
     except (ChatGPTExportError, OSError) as error:
         parser.exit(1, f"导入失败：{error}\n")
     print(f"已归档 {len(written)} 个会话：")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ def 安全名称(值: str, 默认值: str = "未命名会话") -> str:
 
     清理后 = "".join(
         字符 if 字符.isalnum() or 字符 in "-_." else "_"
-        for 字符 in 值.strip()
+        for 字符 in unicodedata.normalize("NFC", 值.strip())
     ).strip(". ")
     return 清理后[:100] or 默认值
 
@@ -78,3 +79,33 @@ def 原子写入会话对象(目标路径: str | Path, 内容: Any) -> Path:
 
     编码后 = (json.dumps(内容, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     return 原子写入字节(目标路径, 编码后)
+
+
+def 写入会话元数据(
+    目录: str | Path,
+    *,
+    来源: str,
+    会话编号: str,
+    日期: str,
+    会话名称: str | None = None,
+    人设编号: str | None = None,
+    归档方式: str,
+    文件列表: list[str] | None = None,
+    其他字段: dict[str, Any] | None = None,
+) -> Path:
+    """写入统一的会话索引元数据，不改动原始会话文件。"""
+
+    元数据: dict[str, Any] = {
+        "schema_version": 1,
+        "provider": 来源,
+        "persona_id": 人设编号,
+        "conversation_id": 会话编号,
+        "title": 会话名称,
+        "date": 日期,
+        "archived_at": datetime.now().astimezone().isoformat(),
+        "archive_method": 归档方式,
+        "files": 文件列表 or [],
+    }
+    if 其他字段:
+        元数据.update(其他字段)
+    return 原子写入会话对象(Path(目录) / "session.meta.json", 元数据)

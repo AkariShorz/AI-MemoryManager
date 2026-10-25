@@ -12,7 +12,7 @@ from typing import Any, Iterator
 默认会话库 = Path(__file__).resolve().parents[1] / "archive" / "Session_Lib"
 默认索引 = Path(__file__).resolve().parent / "search-index.sqlite3"
 可检索扩展名 = {".json", ".jsonl", ".txt", ".md"}
-忽略目录 = {".git", "__pycache__"}
+忽略目录 = {".git", "__pycache__", "summaries"}
 
 
 @dataclass(frozen=True)

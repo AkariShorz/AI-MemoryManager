@@ -14,7 +14,7 @@ PYTHONPATH=src python -m ai_memory_manager.privacy.privacy forget "要遗忘的�
 PYTHONPATH=src python -m ai_memory_manager.privacy.privacy forget "要遗忘的原文" --apply
 ```
 
-精确匹配归档文件中的字符串值和可检索文本，替换为 `[已遗忘]`。JSON/JSONL 结构和其他字段保留。当前索引模块只索引归档正文；概要等尚未实现的衍生存储不在扫描范围内。
+精确匹配归档文件中的字符串值和可检索文本，替换为 `[已遗忘]`。JSON/JSONL 结构和其他字段保留。执行后会从更新后的原文重建每日概要和全文索引；概要不会作为原文被检索。
 
 ## 预览并删除会话
 
@@ -28,7 +28,7 @@ PYTHONPATH=src python -m ai_memory_manager.privacy.privacy delete-session ChatGP
 PYTHONPATH=src python -m ai_memory_manager.privacy.privacy delete-session ChatGPT conversation-id --apply
 ```
 
-按 `session.meta.json` 中完全相等的来源和会话编号匹配，删除匹配的会话目录及其原始文件。对于缺少或损坏清单的目录，不会猜测编号或删除。
+按 `session.meta.json` 中完全相等的来源和会话编号匹配，删除匹配的会话目录及其原始文件，并重建概要和搜索索引。对于缺少或损坏清单的目录，不会猜测编号或删除。
 
 两种操作都支持 `--archive-dir` 和 `--index` 指定路径。Python API：`预览遗忘(...)`、`遗忘内容(..., 确认=True)`、`删除会话(..., 确认=True)`。
 

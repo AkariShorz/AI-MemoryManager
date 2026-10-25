@@ -13,7 +13,13 @@ from typing import Any
 from ai_memory_manager.search.search import 默认索引, 可检索扩展名, 建立索引
 
 默认会话库 = Path(__file__).resolve().parents[1] / "archive" / "Session_Lib"
-忽略目录 = {".git", "__pycache__"}
+忽略目录 = {".git", "__pycache__", "summaries"}
+
+
+def _重建概要(会话库: str | Path) -> None:
+    from ai_memory_manager.summaries.summaries import 生成概要
+
+    生成概要(会话库=会话库)
 
 
 @dataclass(frozen=True)
@@ -145,6 +151,7 @@ def 遗忘内容(
         return 预览
     for 文件 in 预览.文件:
         _遗忘文件(Path(文件), 内容)
+    _重建概要(会话库)
     建立索引(会话库, 索引路径)
     _压缩索引(索引路径)
     return 遗忘预览(预览.文件数, 预览.命中数, 预览.文件, True)
@@ -176,6 +183,7 @@ def 删除会话(
         for 目录 in 匹配目录:
             shutil.rmtree(目录)
         if 匹配目录:
+            _重建概要(会话库)
             建立索引(会话库, 索引路径)
             _压缩索引(索引路径)
     return tuple(匹配目录)

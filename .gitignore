@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+
+# 检索索引由归档重新生成，可能含私人文本
+src/ai_memory_manager/search/search-index.sqlite3

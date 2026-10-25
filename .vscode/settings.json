@@ -1,0 +1,7 @@
+{
+  "dshPanel.url": "http://127.0.0.1:3080",
+  "dshPanel.autoRegisterWorkspace": true,
+  "dshPanel.enableDshModel": true,
+  "dshPanel.chatProvider": "deepseek-web",
+  "dshPanel.chatModel": "deepseek-reasoner"
+}

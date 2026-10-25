@@ -17,15 +17,29 @@ node src/ai_memory_manager/service/openai_connection_watcher.mjs \
 
 监测器仅观察请求 URL 的主机名，不读取请求正文。它只能监测此调试端口暴露的页面；未启用本机调试端口或不在该端口中的客户端不会被发现。按 `Ctrl+C` 会停止监测器并结束其启动的实时捕获脚本。若已手动启动实时捕获，请先停止手动进程，避免重复采集。
 
-### 登录后自动运行
+## 前端生命周期接入
 
-仓库提供 `ai-memory-manager-openai-watcher.service` 用户级 systemd 单元。安装后，监测器会在用户登录时启动：
+前端启动时调用 `startServices()`，前端关闭时调用返回对象的 `stop()`。监测器作为前端子进程运行，不会在前端未启动时单独驻留。可选传入调试端口、轮询间隔和归档目录：
 
-```bash
-mkdir -p ~/.config/systemd/user
-ln -s /home/user/Ai-MemoryManager/src/ai_memory_manager/service/ai-memory-manager-openai-watcher.service ~/.config/systemd/user/ai-memory-manager-openai-watcher.service
-systemctl --user daemon-reload
-systemctl --user enable --now ai-memory-manager-openai-watcher.service
+```js
+import { startServices } from './service/service_manager.mjs';
+
+const services = startServices({
+  port: 9222,
+  pollMs: 2000,
+  outputDir: '/path/to/Session_Lib',
+});
+
+// 在前端的正常关闭流程中调用并等待：
+await services.stop();
 ```
 
-可用 `systemctl --user status ai-memory-manager-openai-watcher.service` 查看状态；日志可用 `journalctl --user -u ai-memory-manager-openai-watcher.service` 查看。
+监测器 stdout/stderr 会分别交给 `onMessage` 和 `onError` 回调；默认输出到控制台。重复调用 `stop()` 安全，SIGINT/SIGTERM 也会触发子进程清理。
+
+如果此前启用了旧版用户级单元，可执行以下命令停止并取消登录自启（按需删除旧符号链接）：
+
+```bash
+systemctl --user disable --now ai-memory-manager-openai-watcher.service
+rm -f ~/.config/systemd/user/ai-memory-manager-openai-watcher.service
+systemctl --user daemon-reload
+```

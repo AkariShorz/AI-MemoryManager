@@ -1783,7 +1783,11 @@ class MemoryApp(QMainWindow):
             else:
                 settings = QSettings()
                 consent_key = f"persona/global_consent_granted/{provider_key}"
-                if not settings.value(consent_key, False, type=bool):
+                granted = settings.value(consent_key, False, type=bool)
+                if provider_key == "codex" and not granted:
+                    # 兼容旧版只记录一个 Codex 同意状态。
+                    granted = settings.value("persona/global_consent_granted", False, type=bool)
+                if not granted:
                     message = QMessageBox(self)
                     message.setIcon(QMessageBox.Icon.Warning)
                     message.setWindowTitle(f"启用 {label} 全局人设")

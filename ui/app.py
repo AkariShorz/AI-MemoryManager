@@ -1253,12 +1253,8 @@ class MemoryApp(QMainWindow):
                 self.global_persona_button.setText("设为全局人设")
                 self.persona_usage_row.hide()
         else:
-            self.persona_edit_button.setEnabled(False)
-            self.persona_send_button.setEnabled(False)
-            self.persona_clear_button.setEnabled(False)
-            self.global_persona_button.setEnabled(False)
-            self.global_persona_button.setText("设为全局人设")
-            self.persona_usage_row.hide()
+            # 切换来源后默认选中第一份人设，避免全局按钮一直灰着让人以为不可用。
+            self.show_persona(self.personas[0]["id"])
         self._sync_persona_watchers()
 
     def _set_persona_selector_arrow(self, expanded):

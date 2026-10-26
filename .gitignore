@@ -1,5 +1,29 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
+
+# 本地数据库：只应由用户在本机生成，不随仓库分发
+**/*.sqlite3
+**/*.sqlite3-*
 
 # 检索索引由归档重新生成，可能含私人文本
 src/ai_memory_manager/search/search-index.sqlite3
+
+# 本地对话与人设的绑定记录
+src/ai_memory_manager/sync/persona_usage.json
+
+# 用户自建人设档案
+src/ai_memory_manager/personas/*.json
+
+# 私有衍生记忆、向量、路由与自动跟进任务
+src/ai_memory_manager/personas/.memory/
+src/ai_memory_manager/personas/.session_libraries.json
+**/.memory_jobs.sqlite3*
+**/.memory_worker.lock
+
+# 个人角色立绘，仅保留通用界面素材
+ui/assets/memory-muse.png
+ui/assets/*-dragon.png
+
+# 本机启动器含绝对路径，按需自行生成
+AI-MemoryManager.desktop

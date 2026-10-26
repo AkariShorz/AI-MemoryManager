@@ -51,11 +51,13 @@ export function 创建可见消息归档器(输出根目录) {
     const 日期 = Number.isNaN(观察时间.valueOf())
       ? new Date().toLocaleDateString('sv-SE')
       : `${观察时间.getFullYear()}-${String(观察时间.getMonth() + 1).padStart(2, '0')}-${String(观察时间.getDate()).padStart(2, '0')}`;
-    const 会话键 = `${来源目录}/${日期}/${标题}--${会话编号}`;
+    const 会话键 = `OpenAI/${来源目录}/${日期}/${标题}--${会话编号}`;
     if (会话缓存.has(会话键)) return 会话缓存.get(会话键);
 
     const 会话目录名 = 来源目录 === 'Codex' ? 会话编号 : `${标题}--${会话编号}`;
-    const 会话目录 = join(输出根目录, 来源目录, 日期, 会话目录名);
+    const 旧归档目录 = join(输出根目录, 来源目录, 日期, 会话目录名);
+    const 新归档目录 = join(输出根目录, 'OpenAI', 来源目录, 日期, 会话目录名);
+    const 会话目录 = existsSync(join(旧归档目录, 'session.meta.json')) ? 旧归档目录 : 新归档目录;
     mkdirSync(会话目录, { recursive: true, mode: 0o700 });
     chmodSync(会话目录, 0o700);
     const 消息路径 = join(会话目录, 'messages.jsonl');
@@ -64,10 +66,15 @@ export function 创建可见消息归档器(输出根目录) {
     // 兼容升级前按来源/标题保存的可见消息日志。
     const 旧日志 = join(输出根目录, 来源目录, `${标题}--${会话编号}`, `${标题}.jsonl`);
     读取消息行(旧日志, 消息表);
+    读取消息行(join(旧归档目录, 'snapshots.jsonl'), 消息表);
+    读取消息行(join(旧归档目录, 'messages.jsonl'), 消息表);
     读取消息行(快照路径, 消息表);
     读取消息行(消息路径, 消息表);
 
-    const 会话 = { 消息表, 消息路径, 快照路径, 定时器: null };
+    const 会话 = { 消息表, 消息路径, 快照路径, 定时器: null,
+      元数据路径: join(会话目录, 'session.meta.json'),
+      元数据: { schema_version: 1, provider: 来源目录, conversation_id: 事件.conversation_id,
+        title: 事件.conversation_title, date: 日期, archive_method: 'visible-capture', persona_id: null } };
     会话缓存.set(会话键, 会话);
     return 会话;
   }
@@ -82,6 +89,15 @@ export function 创建可见消息归档器(输出根目录) {
     writeFileSync(临时路径, 内容 ? `${内容}\n` : '', { mode: 0o600 });
     chmodSync(临时路径, 0o600);
     renameSync(临时路径, 会话.消息路径);
+    let 已有元数据 = {};
+    try { 已有元数据 = JSON.parse(readFileSync(会话.元数据路径, 'utf8')); } catch { /* New capture. */ }
+    if (!已有元数据 || Array.isArray(已有元数据) || typeof 已有元数据 !== 'object') 已有元数据 = {};
+    const 元数据 = { ...会话.元数据, ...已有元数据,
+      files: [...new Set([...(Array.isArray(已有元数据.files) ? 已有元数据.files : []), 'messages.jsonl', 'snapshots.jsonl'])],
+      archived_at: new Date().toISOString() };
+    const 元数据临时路径 = `${会话.元数据路径}.${process.pid}.tmp`;
+    writeFileSync(元数据临时路径, `${JSON.stringify(元数据, null, 2)}\n`, { mode: 0o600 });
+    renameSync(元数据临时路径, 会话.元数据路径);
   }
 
   function 保存快照(事件) {

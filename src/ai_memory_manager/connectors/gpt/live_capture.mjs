@@ -18,6 +18,7 @@ const 取参数 = (名称, 默认值) => {
 };
 
 const 端口 = Number(取参数('port', '9222'));
+const 父进程编号 = Number(取参数('parent-pid', '0'));
 const 轮询间隔 = Math.max(250, Number(取参数('poll-ms', '700')));
 const 当前目录 = dirname(fileURLToPath(import.meta.url));
 const 默认输出目录 = resolve(当前目录, '..', '..', 'archive', 'Session_Lib');
@@ -224,6 +225,10 @@ console.log(`实时捕获已启动，等待 ChatGPT 或 Codex 页面；会话目
 console.log('捕获范围为界面可见文本，按 Ctrl+C 停止。');
 
 while (!停止中) {
+  if (父进程编号) {
+    try { process.kill(父进程编号, 0); }
+    catch { 停止(); break; }
+  }
   try {
     const 页面列表 = await 查找接入页面();
     if (!页面列表.length) {

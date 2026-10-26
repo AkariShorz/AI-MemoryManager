@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import unicodedata
@@ -40,15 +41,19 @@ def 会话目录(
     会话名称: str | None = None,
     输出根目录: str | Path | None = None,
 ) -> Path:
-    """返回按来源、日期和会话标识组织的会话目录。"""
+    """返回按平台、来源、日期和会话标识组织的会话目录。
+
+    ChatGPT 与 Codex 同属 OpenAI 会话库，在共享的 OpenAI 目录下按客户端区分。
+    """
 
     根目录 = Path(输出根目录) if 输出根目录 is not None else 会话库目录
     安全来源 = 安全名称(来源, "Unknown")
+    路径来源 = ("OpenAI", 安全来源) if 安全来源 in {"ChatGPT", "Codex"} else (安全来源,)
     安全编号 = 安全名称(会话编号, "unknown-id")
     安全日期 = 安全名称(日期, "unknown-date")
     安全标题 = 安全名称(会话名称, "") if 会话名称 else ""
     目录名 = f"{安全标题}--{安全编号}" if 安全标题 else 安全编号
-    目标目录 = 根目录 / 安全来源 / 安全日期 / 目录名
+    目标目录 = 根目录.joinpath(*路径来源, 安全日期, 目录名)
     目标目录.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(目标目录, 0o700)
     return 目标目录
@@ -108,4 +113,11 @@ def 写入会话元数据(
     }
     if 其他字段:
         元数据.update(其他字段)
-    return 原子写入会话对象(Path(目录) / "session.meta.json", 元数据)
+    result = 原子写入会话对象(Path(目录) / "session.meta.json", 元数据)
+    try:
+        from ai_memory_manager.memory.jobs import enqueue_archive
+        enqueue_archive(Path(目录))
+    except Exception as error:
+        # Archive completion is independent; the worker's scan repairs missed jobs.
+        logging.getLogger(__name__).warning("归档已保存，记忆任务将由扫描补建：%s", error)
+    return result

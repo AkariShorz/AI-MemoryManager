@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from ai_memory_manager.archive.session_archive import 原子写入会话对象
+from ai_memory_manager.connectors.local_sessions import transcript_messages
 
 默认会话库 = Path(__file__).resolve().parents[1] / "archive" / "Session_Lib"
 概要目录名 = "summaries"
@@ -62,15 +63,32 @@ def _messages(value: Any) -> Iterator[tuple[str, str]]:
             yield from _messages(child)
 
 
-def _session_content(directory: Path) -> list[tuple[str, str]]:
+def _session_content(directory: Path, provider: str = "") -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
+    connector_id = {"Codex": "codex", "Claude Code": "claude-code"}.get(provider)
+    original = directory / "session.jsonl"
+    original_messages: list[tuple[str, str]] = []
+    if connector_id and original.is_file():
+        try:
+            original_messages = transcript_messages(original, connector_id)
+        except OSError:
+            pass
+    found.extend(original_messages)
     for path in sorted(directory.iterdir()):
         if not path.is_file() or path.name in {"session.meta.json", "snapshots.jsonl"}:
+            continue
+        if original_messages and path.name in {"session.jsonl", "messages.jsonl"}:
             continue
         suffix = path.suffix.lower()
         if suffix == ".json":
             found.extend(_messages(_read_json(path)))
         elif suffix == ".jsonl":
+            if path.name == "session.jsonl" and connector_id:
+                try:
+                    found.extend(transcript_messages(path, connector_id))
+                except OSError:
+                    pass
+                continue
             try:
                 lines = path.read_text(encoding="utf-8").splitlines()
             except (OSError, UnicodeError):
@@ -94,7 +112,9 @@ def _brief(text: str, limit: int = 240) -> str:
 
 
 def _session_records(root: Path) -> Iterator[dict[str, Any]]:
-    for directory in sorted(root.glob("*/*/*")):
+    directories = {path.parent for path in root.rglob("session.meta.json")}
+    directories.update(root.glob("*/*/*"))
+    for directory in sorted(directories):
         if not directory.is_dir() or any(part in 忽略目录 for part in directory.parts):
             continue
         metadata = _read_json(directory / "session.meta.json") or {}
@@ -106,13 +126,14 @@ def _session_records(root: Path) -> Iterator[dict[str, Any]]:
             date.fromisoformat(day)
         except ValueError:
             continue
-        messages = _session_content(directory)
+        provider = str(metadata.get("provider") or relative.parts[0])
+        messages = _session_content(directory, provider)
         if not messages:
             continue
         users = [_brief(text) for role, text in messages if role.lower() in {"user", "human"}]
         assistant = [_brief(text) for role, text in messages if role.lower() in {"assistant", "ai"}]
         yield {
-            "provider": str(metadata.get("provider") or relative.parts[0]),
+            "provider": provider,
             "conversation_id": str(metadata.get("conversation_id") or directory.name.split("--")[-1]),
             "title": metadata.get("title") or (directory.name.rsplit("--", 1)[0] if "--" in directory.name else directory.name),
             "date": day,

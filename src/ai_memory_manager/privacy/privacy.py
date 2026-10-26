@@ -13,7 +13,43 @@ from typing import Any
 from ai_memory_manager.search.search import 默认索引, 可检索扩展名, 建立索引
 
 默认会话库 = Path(__file__).resolve().parents[1] / "archive" / "Session_Lib"
+默认记忆目录 = Path(__file__).resolve().parents[1] / "personas" / ".memory"
 忽略目录 = {".git", "__pycache__", "summaries"}
+
+
+def _取消记忆任务(会话库: str | Path, 目录集合) -> None:
+    root = Path(会话库).expanduser().resolve()
+    if not (root / ".memory_jobs.sqlite3").is_file():
+        return
+    from ai_memory_manager.memory.jobs import ArchiveQueue
+    queue = ArchiveQueue(root)
+    try:
+        for directory in 目录集合:
+            queue.cancel(Path(directory))
+    finally:
+        queue.close()
+
+
+def _清单会话(目录: Path) -> tuple[str, str] | None:
+    try:
+        metadata = json.loads((目录 / "session.meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    provider, conversation_id = metadata.get("provider"), metadata.get("conversation_id")
+    return (str(provider), str(conversation_id)) if provider and conversation_id else None
+
+
+def _清理会话记忆(会话集合: set[tuple[str, str]], 会话库: str | Path,
+                记忆目录: str | Path | None) -> None:
+    from ai_memory_manager.memory.lifecycle import purge_conversation
+
+    if 记忆目录 is None:
+        if Path(会话库).expanduser().resolve() != 默认会话库.resolve():
+            return
+        记忆目录 = 默认记忆目录
+    for db_path in Path(记忆目录).expanduser().glob("*.sqlite3"):
+        for provider, conversation_id in 会话集合:
+            purge_conversation(db_path, provider, conversation_id, actor="user")
 
 
 def _重建概要(会话库: str | Path) -> None:
@@ -143,14 +179,19 @@ def 遗忘内容(
     *,
     会话库: str | Path = 默认会话库,
     索引路径: str | Path = 默认索引,
+    记忆目录: str | Path | None = None,
     确认: bool = False,
 ) -> 遗忘预览:
     """精确替换归档内文本，并重建受影响的全文索引；需显式确认。"""
     预览 = 预览遗忘(内容, 会话库=会话库)
     if not 确认 or not 预览.命中数:
         return 预览
+    会话集合 = {identity for file in 预览.文件
+              if (identity := _清单会话(Path(file).parent)) is not None}
+    _取消记忆任务(会话库, {Path(file).parent for file in 预览.文件})
     for 文件 in 预览.文件:
         _遗忘文件(Path(文件), 内容)
+    _清理会话记忆(会话集合, 会话库, 记忆目录)
     _重建概要(会话库)
     建立索引(会话库, 索引路径)
     _压缩索引(索引路径)
@@ -163,6 +204,7 @@ def 删除会话(
     *,
     会话库: str | Path = 默认会话库,
     索引路径: str | Path = 默认索引,
+    记忆目录: str | Path | None = None,
     确认: bool = False,
 ) -> tuple[Path, ...]:
     """按清单内的来源和会话编号匹配并删除会话目录。"""
@@ -180,9 +222,13 @@ def 删除会话(
         if 元数据.get("provider") == 来源 and str(元数据.get("conversation_id")) == str(会话编号):
             匹配目录.append(清单.parent)
     if 确认:
+        会话集合 = {identity for directory in 匹配目录
+                  if (identity := _清单会话(directory)) is not None}
+        _取消记忆任务(会话库, 匹配目录)
         for 目录 in 匹配目录:
             shutil.rmtree(目录)
         if 匹配目录:
+            _清理会话记忆(会话集合, 会话库, 记忆目录)
             _重建概要(会话库)
             建立索引(会话库, 索引路径)
             _压缩索引(索引路径)

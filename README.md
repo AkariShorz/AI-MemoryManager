@@ -23,7 +23,7 @@
 
 | 模块 | 作用 |
 |---|---|
-| `connectors/gpt` | 归档 ChatGPT ZIP、监视下载目录自动导入、捕获 ChatGPT/Codex 界面可见消息，并在 Codex 会话结束时备份本地转录。实时捕获依赖界面结构，不能代替完整原始归档。 |
+| `connectors` | 发现并选择归档本机 Codex/Claude Code 会话；`gpt` 子目录负责 ChatGPT ZIP 导入、ChatGPT/Codex 界面捕获及 Codex 会话结束备份。能力与用法见 `src/ai_memory_manager/connectors/README.md`。 |
 | `connectors/dsh` | 预留 DSH 侧会话接入，由对应开发方实现，并与共用归档流程衔接。 |
 | `archive` | 保存和组织会话原始记录，保留消息原貌，并关联提供方、人设和日期。 |
 | `personas` | 管理各 AI 身份的人设档案、文字特征及外观参考素材。 |
@@ -39,6 +39,12 @@
 
 会话对账模块可从实时捕获的 `snapshots.jsonl` 修复去重后的 `messages.jsonl`；可运行一次或以 2 分钟间隔持续运行。详细说明见 `src/ai_memory_manager/reconciliation/README.md`。
 
+长期记忆功能位于 `src/ai_memory_manager/memory/`：可用本机 Ollama 从所选归档会话提取用户明确表达的长期信息，并存入目标人设；Codex MCP 工具可在当前对话中检索和更新该人设的记忆。写入时去重、保留来源与修订记录，过期记忆不参与检索；模型不能删除，用户可在「记忆更新」页删除。当前 Codex MCP 需重新加载 Codex 后生效；其他客户端尚未接通实时工具。详细策略和本地模型配置见该目录的 README。
+
+记忆搜索已支持本地 BGE-M3 向量语义检索，并与中文关键词匹配混合排序。向量按人设保存在本地 SQLite，首次搜索按需建立，删除记忆时同步清理；Ollama 暂不可用时回退到关键词搜索。模型安装和配置见 `src/ai_memory_manager/memory/README.md`。
+
+记忆跟进现在有两条自动链路：当前模型发现重要信息时通过 MCP 主动写入；会话归档后由本机模型独立提取重要事实与摘要，补录遗漏。应用运行时自动归档可见会话并处理持久任务；失败自动重试，重启可续处理。「记忆更新」页显示待处理、完成、重试和待分配人设数量。全局人设可自动用于未单独绑定的 Codex 会话，不必逐个导入；其他来源通过归档人设关联路由。
+
 ## 建议方向（尚未确定）
 
 以下内容是供后续讨论的初步建议，不代表已经确定的需求或设计：
@@ -52,6 +58,8 @@
 
 每种客户端及其安装方式都需要单独确认可用的接入途径。本项目**不假定 ChatGPT 提供受支持的本地历史记录 API**。如果没有受支持的直接接口，应采用用户授权的导入导出或其他有文档说明的接入方式；不把未公开的私有数据格式当作稳定接口。
 
+桌面应用「导入会话」现在可选择 ChatGPT 官方导出文件，或扫描本机 Codex、Claude Code 会话并逐项归档。扫描和归档不修改来源文件；原始 JSONL 保留在本地会话库。Codex/Claude Code 的文本预览由本地转录提取，工具调用等非文字内容仍保留在原始副本中。详细用法与能力边界见 `src/ai_memory_manager/connectors/README.md`。
+
 ### GPT 实时捕获原型
 
 Linux 上需使用 Node.js 21 或更高版本，并运行 `src/ai_memory_manager/connectors/gpt/live_capture.mjs`。它通过本机调试端口观察 ChatGPT 页面及 Codex 桌面会话中的可见消息，并按来源、日期和会话保存快照及去重后的消息视图。该原型依赖客户端界面结构，可能漏掉未加载的历史、隐藏内容和附件，也不能保证保留平台内部的原始消息结构。官方 ZIP 导入会把完整会话对象逐个写入 `Session_Lib`。
@@ -60,7 +68,7 @@ Linux 上需使用 Node.js 21 或更高版本，并运行 `src/ai_memory_manager
 node src/ai_memory_manager/connectors/gpt/live_capture.mjs
 ```
 
-默认数据写入 `src/ai_memory_manager/archive/Session_Lib/<来源>/<日期>/`。ChatGPT 使用会话名称和编号建目录，Codex 使用会话编号建目录以便与会话结束原文归档合并。实时捕获使用 `messages.jsonl` 保存去重合并后的最新消息，并用 `snapshots.jsonl` 保留变化快照。按 `Ctrl+C` 停止；可用 `--output-dir <目录>` 指定会话目录根路径。运行前需由用户自行启用相应桌面端的本机调试端口。
+默认数据写入 `src/ai_memory_manager/archive/Session_Lib/`。ChatGPT 和 Codex 共用 `OpenAI/<客户端>/<日期>/` 归档层级，ChatGPT 使用会话名称和编号建目录，Codex 使用会话编号建目录以便与会话结束原文归档合并。实时捕获使用 `messages.jsonl` 保存去重合并后的最新消息，并用 `snapshots.jsonl` 保留变化快照。按 `Ctrl+C` 停止；可用 `--output-dir <目录>` 指定会话目录根路径。运行前需由用户自行启用相应桌面端的本机调试端口。
 
 ChatGPT 官方导出 ZIP 可直接归档，或监视下载目录自动处理：
 
@@ -81,4 +89,20 @@ Codex 会话另有基于官方 `SessionEnd` 生命周期钩子的自动归档入
 - 继续评估 ChatGPT 可用的受支持会话接入方式；目前官方 ZIP 仍需用户主动申请，自动监视仅负责下载完成后的导入。
 - 逐步确定长期存储结构及其他客户端的接入方式。
 
-- **前端接入待办：** 后台服务已提供 `service_manager.mjs` 生命周期接口，前端启动时可调用并在关闭时清理。当前仓库尚无前端入口，因此尚未接入具体 UI；独立登录自启的 systemd 单元已移除。接入示例见 `src/ai_memory_manager/service/README.md`。
+- **后台服务接入待办：** `service_manager.mjs` 已提供生命周期接口，桌面界面尚未在启动和关闭时调用它；独立登录自启的 systemd 单元已移除。接入示例见 `src/ai_memory_manager/service/README.md`。
+
+## 桌面应用
+
+仓库现在包含 PyQt6 桌面管理界面。Linux 上安装 `python-pyqt6` 后可运行：
+
+```bash
+./run.sh
+```
+
+需要桌面图标时，可自行创建指向 `run.sh` 的 `.desktop` 启动器（含本机绝对路径，不入库）。应用可导入 ChatGPT 官方导出 ZIP 或 `conversations.json`，也可选择本机 Codex/Claude Code 会话原样归档；支持浏览本地归档、搜索会话文本、生成并查看每日概要，以及切换深色/浅色主题。工作空间的「记忆更新」模块可按人设搜索记忆、查看最近写入、从已关联人设的归档中使用本机 Ollama 提取记忆，并永久删除不想要的记忆；各人设的记忆数据库保存在 `personas/.memory/`，与可移植人设 JSON 分开。Codex MCP 工具会让正在使用已导入人设的模型按问题检索并自行决定是否写入，导入时也会把有效记忆注入对话；该工具需在 Codex 重新加载配置后生效。原始归档保存在 `src/ai_memory_manager/archive/Session_Lib`；主题选择保存在当前用户的 Qt 设置中。快捷键 `F5` 可刷新归档列表。
+
+人设档案页支持导入、编辑和浏览便携 JSON 人设（至少包含 `name` 与 `system_prompt`），并在本地 `src/ai_memory_manager/personas/*.json` 保存档案。编辑可修改名称、简介和系统提示词；档案 ID 保持稳定以保留会话关联。客户端会监视人设目录及已加载的档案文件，检测到新增、修改、替换或删除后自动刷新列表和当前详情；会话归档可使用人设 ID 关联到相应身份。实时捕获服务尚未接入界面开关；其余页面直接使用现有归档和概要模块。
+
+选中人设后，可先用 AI 选择器指定操作目标；目前只接入 Codex。点击「导入到当前 AI 对话」会把其提示词作为一条可见的用户消息发送到当前打开的 Codex 桌面对话。点击「清除当前 AI 人设」则会发送停止使用该人设的消息；确认消息已出现在目标对话后，才移除本地绑定记录。需要 Node.js 21+，且 Codex 已通过本机调试端口 `9222` 启动；若输入框已有草稿，两种发送都会停止以保护草稿。发送成功并在会话中确认消息出现后，页面显示「当前已导入」的 AI 名称及官方应用图标。图标文件来自本机安装的 OpenAI 桌面应用。此状态只统计本应用发送过、且当前仍打开的会话；它不能证明模型一定采用该人设，也无法自动判断其他 AI 客户端中手动设置的人设。记录保存在本地 `src/ai_memory_manager/sync/persona_usage.json`，编辑人设后会提示重新导入。此入口通过桌面界面发送消息，依赖 Codex 当前页面结构；它不会修改 ChatGPT/Codex 的系统指令或账户级自定义指令。
+
+「设为全局人设」按钮可将所选人设写入用户级 `~/.codex/AGENTS.md`，让新建的 Codex 对话默认采用该人设。首次启用会向用户征求一次同意；设置仅影响 Codex，已经打开的对话不会自动重新加载。要在当前对话使用，需点击「导入到当前 AI 对话」；若该对话此前明确要求停用人设，其要求会继续生效，直到用户再次导入或发出新的指令。再次点击全局按钮可关闭，切换人设会替换知忆管理的区块并保留文件中的其他指令。人设仍遵循更高优先级的系统和开发者指令。

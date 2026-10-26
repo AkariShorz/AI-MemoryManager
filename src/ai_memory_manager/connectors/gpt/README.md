@@ -34,8 +34,10 @@ PYTHONPATH=src python src/ai_memory_manager/connectors/gpt/export_import.py \
 归档路径为：
 
 ```text
-Session_Lib/ChatGPT/<创建日期>/<会话名称>--<会话编号>/<会话名称>.json
+Session_Lib/OpenAI/ChatGPT/<创建日期>/<会话名称>--<会话编号>/<会话名称>.json
 ```
+
+ChatGPT 和 Codex 共用 `Session_Lib/OpenAI/`，再按客户端分别归入 `ChatGPT/` 或 `Codex/`。`session.meta.json` 中的 `provider` 仍保存具体客户端名称，因此应用可在同一 OpenAI 分组下区分会话来源。历史上位于 `Session_Lib/ChatGPT/` 或 `Session_Lib/Codex/` 的归档仍可读取，且不会被自动搬动。
 
 ## 实时捕获原型
 
@@ -49,9 +51,9 @@ node src/ai_memory_manager/connectors/gpt/live_capture.mjs
 
 ```text
 Session_Lib/
-├── ChatGPT/日期/会话名称--会话编号/messages.jsonl
-├── ChatGPT/日期/会话名称--会话编号/snapshots.jsonl
-└── Codex/日期/会话编号/{messages.jsonl,snapshots.jsonl,session.jsonl}
+└── OpenAI/
+    ├── ChatGPT/日期/会话名称--会话编号/{messages.jsonl,snapshots.jsonl}
+    └── Codex/日期/会话编号/{messages.jsonl,snapshots.jsonl,session.jsonl}
 ```
 
 `snapshots.jsonl` 保留每次发生变化的可见文本快照；`messages.jsonl` 按消息编号合并为每条消息的最新版本。相同内容不会重复追加，助手流式生成的中间版本会更新到同一条消息。程序重新启动时会加载已有归档，并兼容读取升级前的实时日志。
@@ -67,7 +69,7 @@ node src/ai_memory_manager/connectors/gpt/live_capture.mjs \
 
 ## Codex 会话结束时自动归档
 
-Codex 提供 `SessionEnd` 生命周期钩子。本目录的 `codex_session_end_export.py` 在钩子触发时读取事件中的 `transcript_path`，把转录文件逐字节复制到 `Session_Lib/Codex/<结束日期>/<会话编号>/session.jsonl`，并写入 `session.meta.json` 记录会话编号、时间和来源路径。导出过程不解析或改写转录内容；重复结束同一会话时，会用最新完整副本原子替换旧副本。
+Codex 提供 `SessionEnd` 生命周期钩子。本目录的 `codex_session_end_export.py` 在钩子触发时读取事件中的 `transcript_path`，把转录文件逐字节复制到 `Session_Lib/OpenAI/Codex/<结束日期>/<会话编号>/session.jsonl`，并写入 `session.meta.json` 记录会话编号、时间和来源路径。导出过程不解析或改写转录内容；重复结束同一会话时，会用最新完整副本原子替换旧副本。
 
 安装或移除用户级钩子：
 

@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -62,6 +63,22 @@ class GlobalPersonaTests(unittest.TestCase):
             self.assertIsNone(current_persona_id(self.path, provider="codex"))
             self.assertTrue(clear_global_persona(provider="deepseek"))
             self.assertIsNone(current_persona_id(provider="deepseek"))
+
+    def test_deepseek_global_persona_routes_archived_sessions(self):
+        from ai_memory_manager.memory.routing import resolve_persona
+
+        dsh_home = Path(self.temp.name) / "dsh"
+        personas = Path(self.temp.name) / "personas"
+        personas.mkdir()
+        (personas / "demo.json").write_text(json.dumps({"id": "demo"}), encoding="utf-8")
+        usage = Path(self.temp.name) / "usage.json"
+        with patch.dict(os.environ, {"DSH_HOME": str(dsh_home)}):
+            set_global_persona("demo", "示例角色", "Speak gently.", provider="deepseek")
+            found = resolve_persona("DeepSeek", "conversation-1", personas=personas, usage=usage,
+                                    deepseek_global_path=dsh_home / "AGENTS.md")
+            self.assertEqual(found, personas / "demo.json")
+            self.assertIsNone(resolve_persona("Codex", "conversation-1", personas=personas, usage=usage,
+                                              global_path=self.path))
 
 
 if __name__ == "__main__":

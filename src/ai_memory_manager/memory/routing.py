@@ -27,7 +27,8 @@ def read_bindings(path: Path) -> list[dict[str, Any]]:
 
 def resolve_persona(provider: str, conversation_id: str, *, persona_id: str | None = None,
                     personas: Path = PERSONAS, usage: Path = USAGE,
-                    global_path: Path | None = None) -> Path | None:
+                    global_path: Path | None = None,
+                    deepseek_global_path: Path | None = None) -> Path | None:
     """An explicit but missing/disabled binding never falls through to another persona."""
     if persona_id is None:
         bindings = read_bindings(usage)
@@ -42,6 +43,8 @@ def resolve_persona(provider: str, conversation_id: str, *, persona_id: str | No
                 return None
         elif provider == "Codex":
             persona_id = current_persona_id(global_path)
+        elif provider == "DeepSeek":
+            persona_id = current_persona_id(deepseek_global_path, provider="deepseek")
     if not persona_id:
         return None
     for path in sorted(personas.glob("*.json")):

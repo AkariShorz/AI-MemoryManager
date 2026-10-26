@@ -1,10 +1,13 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_memory_manager.personas.global_persona import (
     clear_global_persona,
     current_persona_id,
+    instructions_path,
     set_global_persona,
 )
 
@@ -47,6 +50,18 @@ class GlobalPersonaTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             set_global_persona("demo", "示例角色", "Speak gently.", self.path)
         self.assertEqual(self.path.read_text(encoding="utf-8"), original)
+
+    def test_deepseek_persona_uses_dsh_agents_file(self):
+        dsh_home = Path(self.temp.name) / "dsh"
+        with patch.dict(os.environ, {"DSH_HOME": str(dsh_home)}):
+            self.assertEqual(instructions_path("deepseek"), dsh_home / "AGENTS.md")
+            set_global_persona("demo", "示例角色", "Speak gently.", provider="deepseek")
+            text = (dsh_home / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("新建的 DeepSeek 对话", text)
+            self.assertEqual(current_persona_id(provider="deepseek"), "demo")
+            self.assertIsNone(current_persona_id(self.path, provider="codex"))
+            self.assertTrue(clear_global_persona(provider="deepseek"))
+            self.assertIsNone(current_persona_id(provider="deepseek"))
 
 
 if __name__ == "__main__":

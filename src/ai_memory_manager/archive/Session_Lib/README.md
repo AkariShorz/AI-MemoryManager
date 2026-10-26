@@ -9,6 +9,8 @@ OpenAI/<客户端>/<日期>/<会话名称>--<会话编号>/<会话文件>
 
 OpenAI 当前包含 `ChatGPT` 和 `Codex`。应用将它们归入同一个 OpenAI 分组，列表和元数据仍保留具体客户端来源。历史上已归档在 `Session_Lib/ChatGPT` 或 `Session_Lib/Codex` 的会话继续兼容读取，不会自动搬动或改写。
 
+DeepSeek Harness（DSH）会话归档在 `DeepSeek/<日期>/<会话编号>/session.jsonl`，内容是解压后的 DSH v4 事件流；来源路径、压缩文件哈希和归档文件哈希记录在 `session.meta.json`。
+
 ChatGPT ZIP 导入保存完整会话 JSON；界面实时捕获保存 `messages.jsonl` 合并视图和 `snapshots.jsonl` 变化记录；Codex 会话结束钩子原样保存本地转录。
 
 支持统一清单的归档入口会在会话目录旁写入 `session.meta.json`，记录 `schema_version`、提供方、可选的人设编号、会话编号、日期、归档方式及文件列表。清单是可重建的索引信息，不替代或改写会话原文。暂时没有人设映射时 `persona_id` 为 `null`。

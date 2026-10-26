@@ -65,7 +65,7 @@ def _messages(value: Any) -> Iterator[tuple[str, str]]:
 
 def _session_content(directory: Path, provider: str = "") -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
-    connector_id = {"Codex": "codex", "Claude Code": "claude-code"}.get(provider)
+    connector_id = {"Codex": "codex", "Claude Code": "claude-code", "DeepSeek": "dsh"}.get(provider)
     original = directory / "session.jsonl"
     original_messages: list[tuple[str, str]] = []
     if connector_id and original.is_file():

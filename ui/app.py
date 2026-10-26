@@ -50,6 +50,8 @@ OFFICIAL_AI_ICONS = {
     "ChatGPT": ROOT / "ui/assets/openai-desktop-official.png",
     "DeepSeek": ROOT / "ui/assets/deepseek-official.svg",
 }
+# 支持写入用户级 AGENTS.md 的客户端；逐会话导入目前只有 Codex 接入。
+GLOBAL_PERSONA_PROVIDERS = {"Codex": "codex", "DeepSeek": "deepseek"}
 
 
 def read_json(path: Path) -> Any:
@@ -122,6 +124,7 @@ def session_records() -> list[dict[str, Any]]:
         records.append({
             "title": str(title),
             "provider": str(meta.get("provider") or nested_source),
+            "client": "DSH" if meta.get("source_connector") == "dsh" else "",
             "date": str(meta.get("date") or (relative.parts[date_index] if len(relative.parts) > date_index else "")),
             "id": str(meta.get("conversation_id") or folder.name.split("--")[-1]),
             "persona": str(meta.get("persona_id") or "未关联人设"),
@@ -140,7 +143,7 @@ def library_group(provider: str) -> str:
 
 def session_text(record: dict[str, Any]) -> str:
     parts = []
-    connector_id = {"Codex": "codex", "Claude Code": "claude-code"}.get(record["provider"])
+    connector_id = {"Codex": "codex", "Claude Code": "claude-code", "DeepSeek": "dsh"}.get(record["provider"])
     original = next((path for path in record["files"] if path.name == "session.jsonl"), None)
     original_messages = []
     if connector_id and original:
@@ -635,7 +638,7 @@ class MemoryApp(QMainWindow):
         self.sessions_back = QPushButton("←  所有来源")
         self.sessions_back.setObjectName("linkButton")
         self.sessions_back.clicked.connect(self.show_sources)
-        self.sessions_hint = QLabel("OpenAI 共用一个会话库，具体会话会标明来自 ChatGPT 或 Codex。")
+        self.sessions_hint = QLabel("OpenAI 共用一个会话库，具体会话会标明来自 ChatGPT 或 Codex；DeepSeek 会话来自 DSH。")
         self.sessions_hint.setObjectName("muted")
         top.addWidget(self.sessions_back)
         top.addWidget(self.sessions_hint)
@@ -713,7 +716,7 @@ class MemoryApp(QMainWindow):
         selector_layout.addWidget(self.persona_selector_arrow)
         self._set_persona_selector_arrow(False)
         self.persona_target_selector.clicked.connect(self._toggle_persona_provider_menu)
-        self.persona_target_selector.setFixedWidth(160)
+        self.persona_target_selector.setFixedWidth(176)
         card_header.addWidget(self.persona_target_selector)
         self.persona_send_button = QPushButton("导入到当前 AI 对话")
         self.persona_send_button.setObjectName("linkButton")
@@ -731,7 +734,7 @@ class MemoryApp(QMainWindow):
         self.global_persona_button.setObjectName("primaryButton")
         self.global_persona_button.setEnabled(False)
         self.global_persona_button.setText("设为全局人设")
-        self.global_persona_button.setToolTip("先选择下方的人设；全局设置目前支持 Codex")
+        self.global_persona_button.setToolTip("先选择下方的人设；全局设置支持 Codex 和 DeepSeek")
         self.global_persona_button.clicked.connect(self.toggle_global_persona)
         self.persona_edit_button = QPushButton("编辑人设")
         self.persona_edit_button.setObjectName("linkButton")
@@ -748,7 +751,7 @@ class MemoryApp(QMainWindow):
         # beyond the card's bottom edge.
         self.persona_provider_menu = QFrame(content)
         self.persona_provider_menu.setObjectName("personaTargetPopup")
-        self.persona_provider_menu.setFixedWidth(160)
+        self.persona_provider_menu.setFixedWidth(176)
         menu_layout = QVBoxLayout(self.persona_provider_menu)
         menu_layout.setContentsMargins(4, 4, 4, 4)
         menu_layout.setSpacing(2)
@@ -1239,7 +1242,7 @@ class MemoryApp(QMainWindow):
             current = next((p for p in self.personas if p["id"] == self.selected_persona_id), None)
             if current:
                 self.persona_edit_button.setEnabled(True)
-                self.persona_send_button.setEnabled(True)
+                self.persona_send_button.setEnabled(self.persona_provider == "Codex")
                 self._show_persona_record(current)
             else:
                 self.selected_persona_id = None
@@ -1299,6 +1302,13 @@ class MemoryApp(QMainWindow):
         self.persona_clear_button.setEnabled(False)
         self.persona_send_button.setVisible(True)
         self.persona_clear_button.setVisible(True)
+        if self.persona_provider == "DeepSeek":
+            tip = "DeepSeek 暂不支持逐会话导入或清除；请使用「设为全局人设」写入 ~/.dsh/AGENTS.md。"
+            self.persona_send_button.setToolTip(tip)
+            self.persona_clear_button.setToolTip(tip)
+        else:
+            self.persona_send_button.setToolTip("向所选 AI 的当前对话发送这份人设。若输入框中已有草稿，将停止发送。")
+            self.persona_clear_button.setToolTip("向所选 AI 的当前对话发送停止使用所选人设的消息，确认发送后移除本地绑定。")
         self.global_persona_button.setEnabled(False)
         self.global_persona_button.setText("设为全局人设")
         self.persona_usage_row.hide()
@@ -1544,7 +1554,7 @@ class MemoryApp(QMainWindow):
         self.persona_edit_button.setEnabled(True)
         self.persona_send_button.setVisible(True)
         self.persona_clear_button.setVisible(True)
-        self.persona_send_button.setEnabled(True)
+        self.persona_send_button.setEnabled(self.persona_provider == "Codex")
         self._show_persona_record(persona)
 
     def edit_persona(self):
@@ -1659,6 +1669,8 @@ class MemoryApp(QMainWindow):
             outdated = []
             digest = hashlib.sha256(persona["system_prompt"].encode("utf-8")).hexdigest()
             for conversation in self.active_persona_conversations:
+                if conversation.get("provider") != self.persona_provider:
+                    continue
                 binding = next((entry for entry in self._read_persona_usage()
                     if entry.get("provider") == conversation.get("provider")
                     and entry.get("conversation_id") == conversation.get("conversation_id")
@@ -1674,16 +1686,25 @@ class MemoryApp(QMainWindow):
             else:
                 status_text = "知忆导入记录：当前对话未检测到"
             tooltip = "这里只统计通过知忆导入且当前仍打开的对话；不会自动确认其他客户端的人设状态。"
-        global_id = global_persona_api.current_persona_id()
-        if self.persona_provider == "Codex":
-            if global_id == persona["id"]:
-                global_text = f"Codex 全局人设：已检测到「{persona['name']}」"
-            elif global_id:
-                global_text = "Codex 全局人设：已检测到其他人设"
+        provider_key = GLOBAL_PERSONA_PROVIDERS.get(self.persona_provider)
+        if provider_key:
+            label = self.persona_provider
+            try:
+                global_id = global_persona_api.current_persona_id(provider=provider_key)
+            except ValueError:
+                global_id = None
+                global_text = f"{label} 全局人设：指令区块格式异常"
             else:
-                global_text = "Codex 全局人设：未检测到"
+                if global_id == persona["id"]:
+                    global_text = f"{label} 全局人设：已检测到「{persona['name']}」"
+                elif global_id:
+                    global_text = f"{label} 全局人设：已检测到其他人设"
+                else:
+                    global_text = f"{label} 全局人设：未检测到"
             status_text = f"{status_text}\n{global_text}"
-            tooltip += " 全局人设状态表示 ~/.codex/AGENTS.md 中的设置已检测到；当前打开的对话是否已经加载，需新建对话后才能确定。"
+            global_path = global_persona_api.instructions_path(provider_key)
+            tooltip += (f" 全局人设状态表示 {global_path} 中的设置已检测到；"
+                        "当前打开的对话是否已经加载，需新建对话后才能确定。")
         display = (persona["id"], status_text, tuple(shown_providers), tooltip)
         if getattr(self, "_persona_usage_display", None) != display:
             self._persona_usage_display = display
@@ -1707,7 +1728,8 @@ class MemoryApp(QMainWindow):
                 name.setObjectName("muted")
                 self.persona_usage_layout.insertWidget(self.persona_usage_layout.count() - 1, name)
         self.persona_clear_button.setEnabled(
-            self._current_persona_binding(persona) is not None
+            self.persona_provider == "Codex"
+            and self._current_persona_binding(persona) is not None
             and self.persona_send_process is None
             and self.persona_clear_process is None
         )
@@ -1715,44 +1737,60 @@ class MemoryApp(QMainWindow):
         self.persona_usage_row.show()
 
     def _render_global_persona_button(self, persona):
-        active_id = global_persona_api.current_persona_id()
-        supported = self.persona_provider == "Codex"
+        provider_key = GLOBAL_PERSONA_PROVIDERS.get(self.persona_provider)
+        label = self.persona_provider
+        supported = provider_key is not None
         if not supported:
-            self.global_persona_button.setText("Codex 全局人设")
-            self.global_persona_button.setToolTip("全局指令目前只支持 Codex")
-        elif active_id == persona["id"]:
+            self.global_persona_button.setText("设为全局人设")
+            self.global_persona_button.setToolTip("全局指令目前支持 Codex 和 DeepSeek")
+            self.global_persona_button.setEnabled(False)
+            return
+        active_id = None
+        try:
+            active_id = global_persona_api.current_persona_id(provider=provider_key)
+        except ValueError:
+            self.global_persona_button.setText("检查全局人设")
+            self.global_persona_button.setToolTip("全局人设指令区块格式异常，请先检查 AGENTS.md")
+            self.global_persona_button.setEnabled(False)
+            return
+        path = global_persona_api.instructions_path(provider_key)
+        if active_id == persona["id"]:
             self.global_persona_button.setText("关闭全局人设")
-            self.global_persona_button.setToolTip("从 Codex 全局指令中移除当前人设")
+            self.global_persona_button.setToolTip(f"从 {path} 中移除当前人设")
         elif active_id:
             self.global_persona_button.setText("切换全局人设")
-            self.global_persona_button.setToolTip("将 Codex 全局默认人设切换为当前所选人设")
+            self.global_persona_button.setToolTip(f"将 {label} 全局默认人设切换为当前所选人设")
         else:
             self.global_persona_button.setText("设为全局人设")
-            self.global_persona_button.setToolTip("让后续 Codex 对话持续参考所选人设")
-        self.global_persona_button.setEnabled(supported)
+            self.global_persona_button.setToolTip(f"让后续 {label} 对话持续参考所选人设")
+        self.global_persona_button.setEnabled(True)
         self.global_persona_button.setVisible(True)
 
     def toggle_global_persona(self):
         persona = next((item for item in getattr(self, "personas", [])
                         if item["id"] == self.selected_persona_id), None)
-        if not persona or self.persona_provider != "Codex":
+        provider_key = GLOBAL_PERSONA_PROVIDERS.get(self.persona_provider)
+        if not persona or provider_key is None:
             return
+        label = self.persona_provider
+        target = global_persona_api.instructions_path(provider_key)
         try:
-            active_id = global_persona_api.current_persona_id()
+            active_id = global_persona_api.current_persona_id(provider=provider_key)
             if active_id == persona["id"]:
-                global_persona_api.clear_global_persona()
+                global_persona_api.clear_global_persona(provider=provider_key)
                 self.show_message(QMessageBox.Icon.Information, self, "全局人设已关闭",
-                                  "已从 Codex 全局指令中移除该人设。")
+                                  f"已从 {target} 中移除该人设。")
             else:
                 settings = QSettings()
-                if not settings.value("persona/global_consent_granted", False, type=bool):
+                consent_key = f"persona/global_consent_granted/{provider_key}"
+                if not settings.value(consent_key, False, type=bool):
                     message = QMessageBox(self)
                     message.setIcon(QMessageBox.Icon.Warning)
-                    message.setWindowTitle("启用 Codex 全局人设")
+                    message.setWindowTitle(f"启用 {label} 全局人设")
                     message.setText(
-                        f"同意将「{persona['name']}」设为 Codex 全局默认人设吗？\n\n"
-                        "启用后，知忆会把人设写入 ~/.codex/AGENTS.md，供之后的新 Codex 对话持续参考。"
-                        "这会影响其他 Codex 项目与对话；已经打开的对话不会自动刷新。"
+                        f"同意将「{persona['name']}」设为 {label} 全局默认人设吗？\n\n"
+                        f"启用后，知忆会把人设写入 {target}，供之后的新 {label} 对话持续参考。"
+                        f"这会影响其他 {label} 项目与对话；已经打开的对话不会自动刷新。"
                         "更高优先级的系统与开发者指令仍然优先。"
                     )
                     agree = message.addButton("同意并启用", QMessageBox.ButtonRole.AcceptRole)
@@ -1762,11 +1800,11 @@ class MemoryApp(QMainWindow):
                     if message.clickedButton() is not agree:
                         return
                 global_persona_api.set_global_persona(
-                    persona["id"], persona["name"], persona["system_prompt"]
+                    persona["id"], persona["name"], persona["system_prompt"], provider=provider_key
                 )
-                settings.setValue("persona/global_consent_granted", True)
+                settings.setValue(consent_key, True)
                 self.show_message(QMessageBox.Icon.Information, self, "全局人设已启用",
-                                  f"「{persona['name']}」已写入 Codex 全局指令。新建的 Codex 对话会读取它；"
+                                  f"「{persona['name']}」已写入 {label} 全局指令。新建的 {label} 对话会读取它；"
                                   "当前已打开的对话需要重新开始才会加载。")
         except (OSError, ValueError) as error:
             self.show_message(QMessageBox.Icon.Warning, self, "全局人设设置失败", str(error))
@@ -1977,7 +2015,8 @@ class MemoryApp(QMainWindow):
 
     def _record_item(self, record):
         title = record["title"] or "未命名会话"
-        item = QListWidgetItem(f"◷    {title}\n       {record['provider']}   ·   {record['date']}   ·   {record['persona']}")
+        client = f" · {record['client']}" if record.get("client") else ""
+        item = QListWidgetItem(f"◷    {title}\n       {record['provider']}{client}   ·   {record['date']}   ·   {record['persona']}")
         item.setData(Qt.ItemDataRole.UserRole, {"type": "session", "record": record})
         return item
 
@@ -2003,14 +2042,14 @@ class MemoryApp(QMainWindow):
             self.sessions_hint.setText("搜索结果")
             visible_records = [
                 record for record in self.records
-                if query in (record["title"] + record["provider"] + library_group(record["provider"]) + record["date"] + session_text(record)).casefold()
+                if query in (record["title"] + record["provider"] + record.get("client", "") + library_group(record["provider"]) + record["date"] + session_text(record)).casefold()
             ]
             for record in visible_records:
                 self.session_list.addItem(self._record_item(record))
             if not visible_records:
                 self.session_list.addItem(QListWidgetItem("没有找到匹配的会话。"))
         elif self.selected_provider is None:
-            self.sessions_hint.setText("OpenAI 共用一个会话库，具体会话会标明来自 ChatGPT 或 Codex。")
+            self.sessions_hint.setText("OpenAI 共用一个会话库，具体会话会标明来自 ChatGPT 或 Codex；DeepSeek 会话来自 DSH。")
             grouped: dict[str, list[dict[str, Any]]] = {}
             for record in self.records:
                 grouped.setdefault(library_group(record["provider"]), []).append(record)
@@ -2045,7 +2084,7 @@ class MemoryApp(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, {"type": "source", "provider": provider})
                 self.session_list.addItem(item)
             if not grouped:
-                self.session_list.addItem(QListWidgetItem("会话库为空。支持导入 ChatGPT 官方导出 ZIP 或 conversations.json。"))
+                self.session_list.addItem(QListWidgetItem("会话库为空。可通过「导入会话」添加 ChatGPT 导出、Codex、Claude Code 或 DeepSeek（DSH）会话。"))
         else:
             visible_records = [record for record in self.records if library_group(record["provider"]) == self.selected_provider]
             if self.selected_provider == "OpenAI":
@@ -2090,7 +2129,8 @@ class MemoryApp(QMainWindow):
         body = session_text(record).strip()[:12000]
         message = QMessageBox(self)
         message.setWindowTitle(record["title"])
-        message.setText(f"{record['provider']}  ·  {record['date']}  ·  {record['id']}")
+        client = f"  ·  {record['client']}" if record.get("client") else ""
+        message.setText(f"{record['provider']}{client}  ·  {record['date']}  ·  {record['id']}")
         message.setInformativeText(body[:1800] if body else "原始会话文件已归档，可从下方打开所在目录。")
         open_action = message.addButton("打开归档目录", QMessageBox.ButtonRole.ActionRole)
         message.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
@@ -2116,7 +2156,7 @@ class MemoryApp(QMainWindow):
     def import_local_sessions(self):
         connectors = [item for item in detect_local_connectors() if item.can_discover]
         if not connectors:
-            self.show_message(QMessageBox.Icon.Information, self, "未发现本机会话", "没有找到可读取的 Codex 或 Claude Code 会话目录。")
+            self.show_message(QMessageBox.Icon.Information, self, "未发现本机会话", "没有找到可读取的 Codex、Claude Code 或 DeepSeek（DSH）会话目录。")
             return
 
         dialog = QDialog(self)

@@ -1,4 +1,9 @@
-"""Manage the Codex user-level persona instruction block."""
+"""Manage the user-level persona instruction block for Codex and DeepSeek (DSH).
+
+Both clients read a user-global ``AGENTS.md``: Codex uses ``$CODEX_HOME/AGENTS.md``
+and DeepSeek Harness uses ``$DSH_HOME/AGENTS.md``. The block format is shared so
+one persona can be switched on per client without touching unrelated instructions.
+"""
 
 from __future__ import annotations
 
@@ -22,9 +27,22 @@ MEMORY_POLICY = "\n".join((
     MEMORY_END,
 ))
 
+PROVIDERS = {
+    "codex": ("Codex", "CODEX_HOME", ".codex"),
+    "deepseek": ("DeepSeek", "DSH_HOME", ".dsh"),
+}
 
-def instructions_path() -> Path:
-    root = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+
+def _provider(provider: str) -> tuple[str, str, str]:
+    try:
+        return PROVIDERS[provider]
+    except KeyError as exc:
+        raise ValueError(f"未知 AI 提供方：{provider}") from exc
+
+
+def instructions_path(provider: str = "codex") -> Path:
+    _, variable, directory = _provider(provider)
+    root = Path(os.environ.get(variable, Path.home() / directory)).expanduser()
     return root / "AGENTS.md"
 
 
@@ -32,8 +50,9 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
-def current_persona_id(path: Path | None = None) -> str | None:
-    text = _read(path or instructions_path())
+def current_persona_id(path: Path | None = None, provider: str = "codex") -> str | None:
+    _provider(provider)
+    text = _read(path or instructions_path(provider))
     start = text.find(BEGIN)
     if start < 0:
         return None
@@ -83,17 +102,21 @@ def _write(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def set_global_persona(persona_id: str, name: str, prompt: str, path: Path | None = None) -> None:
+def set_global_persona(
+    persona_id: str, name: str, prompt: str, path: Path | None = None,
+    provider: str = "codex",
+) -> None:
     if not all(isinstance(value, str) and value.strip() for value in (persona_id, name, prompt)):
         raise ValueError("人设编号、名称和提示词不能为空")
-    target = path or instructions_path()
+    label, _, _ = _provider(provider)
+    target = path or instructions_path(provider)
     text = _read(target)
     safe_prompt = prompt.replace(END, "&lt;!-- END AI Memory Manager global persona --&gt;")
     block = "\n".join((
         BEGIN,
         f"<!-- persona-id: {persona_id} -->",
         f"## 全局默认人设：{name}",
-        "在新建的 Codex 对话中，默认采用以下人设直接回应用户，并在后续轮次保持其语言风格。若用户在某段对话中明确要求停用、切换人设或使用普通助手方式，则以该对话中的最新要求为准。此人设不覆盖更高优先级的系统或开发者指令，也不要求模型声称具备未接入的能力。",
+        f"在新建的 {label} 对话中，默认采用以下人设直接回应用户，并在后续轮次保持其语言风格。若用户在某段对话中明确要求停用、切换人设或使用普通助手方式，则以该对话中的最新要求为准。此人设不覆盖更高优先级的系统或开发者指令，也不要求模型声称具备未接入的能力。",
         "",
         safe_prompt,
         "",
@@ -103,10 +126,11 @@ def set_global_persona(persona_id: str, name: str, prompt: str, path: Path | Non
     _write(target, _replace_block(text, block))
 
 
-def refresh_memory_policy(path: Path | None = None) -> bool:
+def refresh_memory_policy(path: Path | None = None, provider: str = "codex") -> bool:
     """Upgrade only our policy inside an existing enabled persona block."""
-    target = path or instructions_path()
-    if current_persona_id(target) is None:
+    _provider(provider)
+    target = path or instructions_path(provider)
+    if current_persona_id(target, provider) is None:
         return False
     text = _read(target)
     start, end = text.index(BEGIN), text.index(END)
@@ -119,8 +143,9 @@ def refresh_memory_policy(path: Path | None = None) -> bool:
     return True
 
 
-def clear_global_persona(path: Path | None = None) -> bool:
-    target = path or instructions_path()
+def clear_global_persona(path: Path | None = None, provider: str = "codex") -> bool:
+    _provider(provider)
+    target = path or instructions_path(provider)
     text = _read(target)
     updated = _replace_block(text, None)
     if updated == text:

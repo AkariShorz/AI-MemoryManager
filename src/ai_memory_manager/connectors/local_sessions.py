@@ -21,6 +21,7 @@ from ai_memory_manager.archive.session_archive import (
     原子写入字节,
     写入会话元数据,
 )
+from ai_memory_manager.connectors.dsh import dsh_sessions
 
 
 @dataclass(frozen=True)
@@ -49,9 +50,20 @@ class SessionPreview:
 _SOURCES = {
     "codex": ("Codex", "sessions"),
     "claude-code": ("Claude Code", "projects"),
+    "dsh": ("DeepSeek", "sessions"),
 }
+_LABELS = {"codex": "Codex", "claude-code": "Claude Code", "dsh": "DeepSeek (DSH)"}
 _CODEX_NAME = re.compile(r"^rollout-.*-([0-9a-fA-F-]{36})\.jsonl$")
 _BOILERPLATE = ("# AGENTS.md", "<INSTRUCTIONS>", "<system-reminder>", "<system_instruction>")
+
+
+def _dsh_home(home: Path | None = None) -> Path:
+    """Resolve the DSH data root while still allowing callers to pass a fake home."""
+
+    base = os.environ.get("DSH_HOME")
+    if base:
+        return Path(base).expanduser()
+    return (Path(home) if home is not None else Path.home()).expanduser() / ".dsh"
 
 
 def _source_root(connector_id: str, home: Path | None = None) -> Path:
@@ -60,6 +72,8 @@ def _source_root(connector_id: str, home: Path | None = None) -> Path:
     user_home = Path(home) if home is not None else Path.home()
     if connector_id == "codex":
         base = Path(os.environ.get("CODEX_HOME") or user_home / ".codex")
+    elif connector_id == "dsh":
+        base = _dsh_home(home)
     else:
         base = user_home / ".claude"
     return base.expanduser() / _SOURCES[connector_id][1]
@@ -69,14 +83,14 @@ def detect_local_connectors(home: Path | None = None) -> tuple[ConnectorInfo, ..
     """Report actual local read/archive capabilities without writing to any source."""
 
     result = []
-    for connector_id, (label, _) in _SOURCES.items():
+    for connector_id in _SOURCES:
         root = _source_root(connector_id, home)
         installed = root.parent.is_dir()
         readable = root.is_dir() and os.access(root, os.R_OK | os.X_OK)
         note = "可发现并归档本机会话" if readable else (
             "已安装，但没有可读取的会话目录" if installed else "未发现本地客户端数据"
         )
-        result.append(ConnectorInfo(connector_id, label, root, installed, readable, readable, note))
+        result.append(ConnectorInfo(connector_id, _LABELS[connector_id], root, installed, readable, readable, note))
     return tuple(result)
 
 
@@ -85,6 +99,8 @@ def _candidate_paths(connector_id: str, root: Path) -> Iterator[Path]:
         return
     if connector_id == "codex":
         candidates = root.rglob("rollout-*.jsonl")
+    elif connector_id == "dsh":
+        candidates = root.rglob(dsh_sessions.会话文件名)
     else:
         candidates = root.rglob("*.jsonl")
     for path in candidates:
@@ -92,6 +108,9 @@ def _candidate_paths(connector_id: str, root: Path) -> Iterator[Path]:
             continue
         if connector_id == "codex":
             if not _CODEX_NAME.match(path.name):
+                continue
+        elif connector_id == "dsh":
+            if not dsh_sessions.is_session_file(path):
                 continue
         elif "subagents" in path.relative_to(root).parts:
             continue
@@ -179,6 +198,19 @@ def discover_local_sessions(
                 stat = path.stat()
                 if stat.st_size == 0:
                     continue
+                if selected == "dsh":
+                    session_id = dsh_sessions.session_id(path)
+                    if session_id is None:
+                        continue
+                    title = dsh_sessions.session_title(path, _dsh_home(home))
+                    if not title and not dsh_sessions.has_messages(path):
+                        continue
+                    result.append(SessionPreview(
+                        selected, provider, session_id, path,
+                        title or session_id, datetime.fromtimestamp(stat.st_mtime).astimezone(),
+                        stat.st_size, stat.st_mtime_ns,
+                    ))
+                    continue
                 if selected == "codex":
                     match = _CODEX_NAME.match(path.name)
                     session_id = match.group(1) if match else path.stem
@@ -202,7 +234,12 @@ def archive_local_session(
     session: SessionPreview, output_dir: str | Path | None = None,
     persona_id: str | None = None, *, home: Path | None = None,
 ) -> Path:
-    """Copy one selected source file byte for byte, atomically, into Session_Lib."""
+    """Archive one selected source into Session_Lib.
+
+    Codex and Claude Code transcripts are copied byte for byte. DSH sessions are
+    stored as decompressed ``session.v4.jsonl`` because that is the format DSH
+    itself exports; the source archive and its hash stay recorded in metadata.
+    """
 
     root = _source_root(session.connector_id, home).resolve()
     source = session.source_path
@@ -212,16 +249,28 @@ def archive_local_session(
     if session.connector_id == "codex":
         match = _CODEX_NAME.match(source.name)
         expected_id = match.group(1) if match else None
+    elif session.connector_id == "dsh":
+        expected_id = dsh_sessions.session_id(source)
     else:
         expected_id = source.stem if "subagents" not in resolved_source.relative_to(root).parts else None
     if expected_id != session.session_id:
         raise ValueError("会话编号与来源文件不匹配")
 
     before = source.stat()
-    content = source.read_bytes()
+    source_bytes = source.read_bytes()
     after = source.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
         raise OSError("来源会话正在变化，请稍后重试")
+    source_digest = hashlib.sha256(source_bytes).hexdigest()
+    if session.connector_id == "dsh":
+        try:
+            content = dsh_sessions.decompress_session(source_bytes)
+        except (OSError, ValueError) as error:
+            raise OSError("来源会话暂时无法解压，可能仍在写入，请稍后重试") from error
+        transcript_format = "dsh-session-v4-jsonl (decompressed from zstd)"
+    else:
+        content = source_bytes
+        transcript_format = "opaque; copied byte-for-byte"
     digest = hashlib.sha256(content).hexdigest()
     day = session.updated_at.date().isoformat()
     output_root = Path(output_dir) if output_dir is not None else 会话库目录
@@ -251,8 +300,9 @@ def archive_local_session(
         "source_path": str(source),
         "source_size": after.st_size,
         "source_mtime_ns": after.st_mtime_ns,
-        "source_sha256": digest,
-        "transcript_format": "opaque; copied byte-for-byte",
+        "source_sha256": source_digest,
+        "transcript_sha256": digest,
+        "transcript_format": transcript_format,
     })
     写入会话元数据(
         directory, 来源=session.provider, 会话编号=session.session_id, 日期=day,
@@ -270,6 +320,8 @@ def transcript_messages(path: str | Path, connector_id: str) -> list[tuple[str, 
 
     if connector_id not in _SOURCES:
         raise ValueError(f"未知连接器：{connector_id}")
+    if connector_id == "dsh":
+        return dsh_sessions.session_messages(path)
     messages = []
     event_fallback = []
     with Path(path).open("r", encoding="utf-8", errors="replace") as source:
